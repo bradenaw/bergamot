@@ -195,7 +195,9 @@ func (c *Cache[K, V]) Forget(k K) {
 	c.m.Lock()
 	defer c.m.Unlock()
 	c.shortTerm.Delete(k)
+	c.shortTermHistory.Delete(k)
 	c.longTerm.Delete(k)
+	c.longTermHistory.Delete(k)
 }
 
 type kvPair[K any, V any] struct {
