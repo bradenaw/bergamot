@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/bradenaw/gokart/internal/xlist"
+	"github.com/bradenaw/juniper/container/xlist"
 )
 
 type vAndRef[V any] struct {
