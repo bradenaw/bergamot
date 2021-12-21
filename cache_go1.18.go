@@ -59,7 +59,7 @@ type Cache[K comparable, V any] struct {
 
 func NewCache[K comparable, V any](size int) *Cache[K, V] {
 	return &Cache[K, V]{
-		size: size,
+		size:             size,
 		shortTerm:        newMapRing[K, vAndRef[V]](size / 2),
 		shortTermHistory: newMapList[K, struct{}](size / 2),
 		longTerm:         newMapRing[K, vAndRef[V]](size / 2),

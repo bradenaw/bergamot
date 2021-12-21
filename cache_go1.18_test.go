@@ -13,7 +13,7 @@ func FuzzCache(f *testing.F) {
 		}
 
 		t.Logf("size %d", size)
-		
+
 		populate := func(b byte) uint32 {
 			return (uint32(b) * 2547493511) ^ 0x95835b12
 		}

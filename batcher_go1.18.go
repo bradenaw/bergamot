@@ -12,8 +12,8 @@ import (
 
 type waitable[T any] struct {
 	value T
-	err error
-	wait chan struct{}
+	err   error
+	wait  chan struct{}
 }
 
 func (w *waitable[T]) Set(value T) {
@@ -38,18 +38,18 @@ func (w *waitable[T]) WaitContext(ctx context.Context) (T, error) {
 
 type batchRequest[T comparable, U any] struct {
 	buffer map[T]*waitable[U]
-	batch []T
+	batch  []T
 }
 
 type Batcher[T comparable, U any] struct {
-	m sync.Mutex
-	buffer map[T]*waitable[U]
+	m          sync.Mutex
+	buffer     map[T]*waitable[U]
 	bufferSize int
 	bufferFull chan struct{}
-	interval time.Duration
-	split func(buffer []T) [][]T
-	fetch func(ctx context.Context, batch []T) ([]U, error)
-	timer *time.Timer
+	interval   time.Duration
+	split      func(buffer []T) [][]T
+	fetch      func(ctx context.Context, batch []T) ([]U, error)
+	timer      *time.Timer
 }
 
 func NewBatcher[T comparable, U any](
@@ -64,13 +64,13 @@ func NewBatcher[T comparable, U any](
 	batchReqs := make(chan batchRequest[T, U])
 
 	b := &Batcher[T, U]{
-		buffer: make(map[T]*waitable[U], bufferSize),
+		buffer:     make(map[T]*waitable[U], bufferSize),
 		bufferSize: bufferSize,
 		bufferFull: make(chan struct{}, 1),
-		timer: time.NewTimer(365 * 24 * time.Hour),
-		interval: interval,
-		split: split,
-		fetch: fetch,
+		timer:      time.NewTimer(365 * 24 * time.Hour),
+		interval:   interval,
+		split:      split,
+		fetch:      fetch,
 	}
 
 	var wg sync.WaitGroup
@@ -96,7 +96,7 @@ func NewBatcher[T comparable, U any](
 			b.m.Unlock()
 			for _, batch := range batches {
 				batchReqs <- batchRequest[T, U]{
-					batch: batch,
+					batch:  batch,
 					buffer: buffer,
 				}
 			}
@@ -119,11 +119,11 @@ func NewBatcher[T comparable, U any](
 				resps, err := b.fetch(ctx, batchReq.batch)
 				if err != nil {
 					for _, req := range batchReq.batch {
-						batchReq.buffer[req].Err(err)	
+						batchReq.buffer[req].Err(err)
 					}
 				} else {
 					for i := range batchReq.batch {
-						batchReq.buffer[batchReq.batch[i]].Set(resps[i])	
+						batchReq.buffer[batchReq.batch[i]].Set(resps[i])
 					}
 				}
 			}
