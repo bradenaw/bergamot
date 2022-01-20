@@ -14,12 +14,13 @@ type vAndRef[V any] struct {
 	ref uint32
 }
 
-// CAR is a CLOCK-with-Adaptive-Replacement cache backing. Its methods are safe to call
-// concurrently.
+// CAR is a CLOCK-with-Adaptive-Replacement cache backing.
 //
-// The eviction policy is an approximation to a combination between LRU and LFU, self-balancing
-// resources between the two based on their relative usefulness. Approximation allows lower lock
-// contention.
+// The eviction policy is an approximation to a combination between least-recently-used and
+// least-frequently-used, self-balancing resources between the two based on their relative
+// usefulness. Approximation allows lower lock contention
+//
+// CAR's methods may be called concurrently.
 //
 // https://www.usenix.org/legacy/publications/library/proceedings/fast04/tech/full_papers/bansal/bansal.pdf
 type CAR[K comparable, V any] struct {
@@ -306,6 +307,10 @@ func (ml *mapList[K, V]) InsertBefore(
 	node := ml.l.InsertBefore(kvPair[K, V]{k, v}, mark)
 	ml.m[k] = node
 	return node
+}
+
+func (ml *mapList[K, V]) MoveToBack(node *xlist.Node[kvPair[K, V]]) {
+	ml.l.MoveToBack(node)
 }
 
 func (ml *mapList[K, V]) Get(k K) (*xlist.Node[kvPair[K, V]], bool) {

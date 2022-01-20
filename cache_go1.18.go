@@ -5,6 +5,7 @@ package bergamot
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bradenaw/juniper/slices"
@@ -20,6 +21,8 @@ type Cache[K comparable, V any] struct {
 	storage Storage[K, V]
 	waits   syncMap[K, *waitable[V]]
 	reqs    chan request[K, V]
+	hits    uint64
+	misses  uint64
 
 	bg *xsync.Group
 }
@@ -175,12 +178,15 @@ func NewBatchFetchCache[K comparable, V any](
 }
 
 func (c *Cache[K, V]) TryGet(key K) (V, bool) {
-	return c.storage.Get(key)
+	value, ok := c.storage.Get(key)
+	c.mark(ok)
+	return value, ok
 }
 
 func (c *Cache[K, V]) Get(ctx context.Context, key K) (V, error) {
 	c.m.RLock()
 	v, ok := c.storage.Get(key)
+	c.mark(ok)
 	if ok {
 		c.m.RUnlock()
 		return v, nil
@@ -213,6 +219,7 @@ func (c *Cache[K, V]) GetBatch(ctx context.Context, keys []K) ([]V, error) {
 			missIdxs = append(missIdxs, i)
 		}
 	}
+	c.markMany(len(keys)-len(misses), len(misses))
 
 	waits := make([]*waitable[V], len(misses))
 	for i, key := range misses {
@@ -247,8 +254,27 @@ func (c *Cache[K, V]) Forget(key K) {
 	c.storage.Forget(key)
 }
 
+func (c *Cache[K, V]) HitRate() float64 {
+	hits := atomic.LoadUint64(&c.hits)
+	misses := atomic.LoadUint64(&c.misses)
+	return float64(hits) / (float64(hits) + float64(misses))
+}
+
 func (c *Cache[K, V]) Close() {
 	c.bg.Wait()
+}
+
+func (c *Cache[K, V]) mark(hit bool) {
+	if hit {
+		atomic.AddUint64(&c.hits, 1)
+	} else {
+		atomic.AddUint64(&c.misses, 1)
+	}
+}
+
+func (c *Cache[K, V]) markMany(hits int, misses int) {
+	atomic.AddUint64(&c.hits, uint64(hits))
+	atomic.AddUint64(&c.misses, uint64(misses))
 }
 
 type syncMap[K comparable, V any] struct{ xsync.Map[K, V] }
