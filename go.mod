@@ -1,5 +1,5 @@
-module github.com/bradenaw/gokart
+module github.com/bradenaw/bergamot
 
 go 1.18
 
-require github.com/bradenaw/juniper v0.0.0-20211219202820-7c8c9c942dbf
+require github.com/bradenaw/juniper v0.0.0-20220120190312-82ab4c2e8470
