@@ -14,7 +14,9 @@ type Unbounded[K comparable, V any] struct {
 	m xsync.Map[K, V]
 }
 
-func NewNeverEvict[K comparable, V any]() *Unbounded[K, V] {
+var _ Storage[byte, int] = &Unbounded[byte, int]{}
+
+func NewUnbounded[K comparable, V any]() *Unbounded[K, V] {
 	return &Unbounded[K, V]{}
 }
 

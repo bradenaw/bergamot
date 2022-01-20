@@ -66,6 +66,8 @@ type CAR[K comparable, V any] struct {
 	shortTermTargetSize int
 }
 
+var _ Storage[byte, int] = &CAR[byte, int]{}
+
 // NewCAR returns a CAR that has space for the given number of items.
 func NewCAR[K comparable, V any](size int) *CAR[K, V] {
 	return &CAR[K, V]{
