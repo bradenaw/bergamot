@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func FuzzCache(f *testing.F) {
+func FuzzCAR(f *testing.F) {
 	f.Fuzz(func(t *testing.T, size byte, b []byte) {
 		if size == 0 {
 			return
@@ -18,7 +18,7 @@ func FuzzCache(f *testing.F) {
 			return (uint32(b) * 2547493511) ^ 0x95835b12
 		}
 
-		cache := NewCache[byte, uint32](int(size))
+		cache := NewCAR[byte, uint32](int(size))
 
 		for i := range b {
 			v, ok := cache.Get(b[i])
@@ -32,12 +32,12 @@ func FuzzCache(f *testing.F) {
 			}
 			t.Logf("Get(%#v) miss, Put(%#v, %08x)", b[i], b[i], exp)
 			cache.Put(b[i], exp)
-			logCache(t, cache)
+			logCAR(t, cache)
 		}
 	})
 }
 
-func logCache[K comparable, V any](t *testing.T, c *Cache[K, V]) {
+func logCAR[K comparable, V any](t *testing.T, c *CAR[K, V]) {
 	t.Log("cache =================")
 	t.Log("  shortTerm ===========")
 	for node := c.shortTerm.ml.l.Front(); node != nil; node = node.Next() {

@@ -41,7 +41,7 @@ type batchRequest[T comparable, U any] struct {
 	batch  []T
 }
 
-type Batcher[T comparable, U any] struct {
+type batcher[T comparable, U any] struct {
 	m          sync.Mutex
 	buffer     map[T]*waitable[U]
 	bufferSize int
@@ -52,18 +52,18 @@ type Batcher[T comparable, U any] struct {
 	timer      *time.Timer
 }
 
-func NewBatcher[T comparable, U any](
+func newBatcher[T comparable, U any](
 	bufferSize int,
 	interval time.Duration,
 	split func(buffer []T) [][]T,
 	fetch func(ctx context.Context, batch []T) ([]U, error),
 	fetchParallelism int,
-) (_b *Batcher[T, U], _close func()) {
+) (_b *batcher[T, U], _close func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	batchReqs := make(chan batchRequest[T, U])
 
-	b := &Batcher[T, U]{
+	b := &batcher[T, U]{
 		buffer:     make(map[T]*waitable[U], bufferSize),
 		bufferSize: bufferSize,
 		bufferFull: make(chan struct{}, 1),
@@ -136,7 +136,7 @@ func NewBatcher[T comparable, U any](
 	}
 }
 
-func (b *Batcher[T, U]) Request(ctx context.Context, req T) (U, error) {
+func (b *batcher[T, U]) Request(ctx context.Context, req T) (U, error) {
 	b.m.Lock()
 	w, ok := b.buffer[req]
 	if !ok {

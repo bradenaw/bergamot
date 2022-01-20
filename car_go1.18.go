@@ -14,7 +14,15 @@ type vAndRef[V any] struct {
 	ref uint32
 }
 
-type Cache[K comparable, V any] struct {
+// CAR is a CLOCK-with-Adaptive-Replacement cache backing. Its methods are safe to call
+// concurrently.
+//
+// The eviction policy is an approximation to a combination between LRU and LFU, self-balancing
+// resources between the two based on their relative usefulness. Approximation allows lower lock
+// contention.
+//
+// https://www.usenix.org/legacy/publications/library/proceedings/fast04/tech/full_papers/bansal/bansal.pdf
+type CAR[K comparable, V any] struct {
 	m sync.RWMutex
 
 	// Size of the cache, in number of items. We additionally keep this many keys worth of eviction
@@ -57,8 +65,9 @@ type Cache[K comparable, V any] struct {
 	shortTermTargetSize int
 }
 
-func NewCache[K comparable, V any](size int) *Cache[K, V] {
-	return &Cache[K, V]{
+// NewCAR returns a CAR that has space for the given number of items.
+func NewCAR[K comparable, V any](size int) *CAR[K, V] {
+	return &CAR[K, V]{
 		size:             size,
 		shortTerm:        newMapRing[K, vAndRef[V]](size / 2),
 		shortTermHistory: newMapList[K, struct{}](size / 2),
@@ -67,7 +76,12 @@ func NewCache[K comparable, V any](size int) *Cache[K, V] {
 	}
 }
 
-func (c *Cache[K, V]) Get(k K) (V, bool) {
+// Get returns the value associated with k. The second return indicates whether k was in the cache,
+// and if false the first return is meaningless.
+func (c *CAR[K, V]) Get(k K) (V, bool) {
+	// Here's the lower contention that CAR allows - with an actual LRU/LFU we'd need to take this
+	// mutex in W mode to change the order of shortTerm/longTerm, but instead we can get away with
+	// this mutex in R and just an atomic store to mark used items.
 	c.m.RLock()
 	defer c.m.RUnlock()
 
@@ -85,7 +99,8 @@ func (c *Cache[K, V]) Get(k K) (V, bool) {
 	return zero, false
 }
 
-func (c *Cache[K, V]) Put(k K, v V) {
+// Put adds the given key/value pair to the cache.
+func (c *CAR[K, V]) Put(k K, v V) {
 	c.m.Lock()
 	defer c.m.Unlock()
 
@@ -150,7 +165,7 @@ func (c *Cache[K, V]) Put(k K, v V) {
 	}
 }
 
-func (c *Cache[K, V]) evictLocked() {
+func (c *CAR[K, V]) evictLocked() {
 	for {
 		if c.shortTerm.Len() >= maxInt(1, c.shortTermTargetSize) {
 			// shortTerm is larger than its target size, so prefer to remove from it.
@@ -191,7 +206,8 @@ func (c *Cache[K, V]) evictLocked() {
 	}
 }
 
-func (c *Cache[K, V]) Forget(k K) {
+// Forget removes k from the cache if present.
+func (c *CAR[K, V]) Forget(k K) {
 	c.m.Lock()
 	defer c.m.Unlock()
 	c.shortTerm.Delete(k)
