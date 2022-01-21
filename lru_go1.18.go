@@ -16,7 +16,7 @@ type LRU[K comparable, V any] struct {
 	size  int
 }
 
-var _ Storage[byte, int] = &LRU[byte, int]{}
+var _ Backing[byte, int] = &LRU[byte, int]{}
 
 func NewLRU[K comparable, V any](size int) *LRU[K, V] {
 	return &LRU[K, V]{
