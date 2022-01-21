@@ -5,3 +5,23 @@ that can be used on their own or paired with the `Cache` type to coordinate popu
 misses.
 
 It uses Go generics, and so requires Go 1.18 to build.
+
+Here's a straightforward usage:
+
+```
+c := bergamot.NewCache[uint64, User](
+    // fetch: used to populate the cache on a miss
+    func(ctx context.Context, userID uint64) (User, error) {
+        return callSomeExpensiveRPC(ctx, userID)
+    },
+    8, // how many fetches can be active at once
+    // use CAR (Clock with Adaptive Replacement) as the eviction policy
+    bergamot.NewCAR(
+        10000, // the cache capacity, in number of items
+    ),
+)
+
+// ...
+
+u, err := c.Get(ctx, 12345)
+```
