@@ -56,46 +56,6 @@ type Backing[K any, V any] interface {
 	Forget(K)
 }
 
-type future[T any] struct {
-	value T
-	err   error
-	wait  chan struct{}
-}
-
-func newFuture[T any]() *future[T] {
-	return &future[T]{
-		wait: make(chan struct{}),
-	}
-}
-
-func (w *future[T]) Fill(value T) {
-	w.value = value
-	close(w.wait)
-}
-
-func (w *future[T]) Err(err error) {
-	w.err = err
-	close(w.wait)
-}
-
-func (w *future[T]) waitContext(ctx context.Context) (T, error) {
-	select {
-	case <-ctx.Done():
-		var zero T
-		return zero, ctx.Err()
-	case <-w.wait:
-		return w.value, w.err
-	}
-}
-
-type request[K comparable, V any] struct {
-	key    K
-	future *future[V]
-}
-
-func (req *request[K, V]) Fill(v V)      { req.future.Fill(v) }
-func (req *request[K, V]) Err(err error) { req.future.Err(err) }
-
 // NewCache returns a Cache that uses backing as its backing store. It has fetchParallelism
 // background goroutines that will call fetch for each miss in Get and GetBatch.
 func NewCache[K comparable, V any](
@@ -320,6 +280,46 @@ func (c *Cache[K, V]) markMany(hits int, misses int) {
 	atomic.AddUint64(&c.hits, uint64(hits))
 	atomic.AddUint64(&c.misses, uint64(misses))
 }
+
+type future[T any] struct {
+	value T
+	err   error
+	wait  chan struct{}
+}
+
+func newFuture[T any]() *future[T] {
+	return &future[T]{
+		wait: make(chan struct{}),
+	}
+}
+
+func (w *future[T]) Fill(value T) {
+	w.value = value
+	close(w.wait)
+}
+
+func (w *future[T]) Err(err error) {
+	w.err = err
+	close(w.wait)
+}
+
+func (w *future[T]) waitContext(ctx context.Context) (T, error) {
+	select {
+	case <-ctx.Done():
+		var zero T
+		return zero, ctx.Err()
+	case <-w.wait:
+		return w.value, w.err
+	}
+}
+
+type request[K comparable, V any] struct {
+	key    K
+	future *future[V]
+}
+
+func (req *request[K, V]) Fill(v V)      { req.future.Fill(v) }
+func (req *request[K, V]) Err(err error) { req.future.Err(err) }
 
 type syncMap[K comparable, V any] struct{ xsync.Map[K, V] }
 
