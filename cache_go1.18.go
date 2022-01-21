@@ -195,16 +195,15 @@ func (c *Cache[K, V]) Get(ctx context.Context, key K) (V, error) {
 		return v, nil
 	}
 	w, alreadyExisted := c.waiters.LoadOrStoreFunc(key, newFuture[V])
+	c.m.RUnlock()
 	if !alreadyExisted {
 		select {
 		case <-ctx.Done():
-			c.m.RUnlock()
 			var zero V
 			return zero, ctx.Err()
 		case c.reqs <- request[K, V]{key: key, future: w}:
 		}
 	}
-	c.m.RUnlock()
 	return w.waitContext(ctx)
 }
 
