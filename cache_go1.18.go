@@ -14,12 +14,12 @@ import (
 )
 
 type Cache[K comparable, V any] struct {
-	// Used for atomicity between cache misses and waits populates. Deletes from waits must hold in
-	// W, interactions with storage+waits can hold in R.
+	// Used for atomicity between cache misses and waiters populates. Deletes from waiters must hold
+	// in W, interactions with storage+waiters can hold in R.
 	m sync.RWMutex
 
 	storage Storage[K, V]
-	waits   syncMap[K, *waitable[V]]
+	waiters syncMap[K, *future[V]]
 	reqs    chan request[K, V]
 	hits    uint64
 	misses  uint64
@@ -33,29 +33,29 @@ type Storage[K any, V any] interface {
 	Forget(K)
 }
 
-type waitable[T any] struct {
+type future[T any] struct {
 	value T
 	err   error
 	wait  chan struct{}
 }
 
-func newWaitable[T any]() *waitable[T] {
-	return &waitable[T]{
+func newFuture[T any]() *future[T] {
+	return &future[T]{
 		wait: make(chan struct{}),
 	}
 }
 
-func (w *waitable[T]) Set(value T) {
+func (w *future[T]) Fill(value T) {
 	w.value = value
 	close(w.wait)
 }
 
-func (w *waitable[T]) Err(err error) {
+func (w *future[T]) Err(err error) {
 	w.err = err
 	close(w.wait)
 }
 
-func (w *waitable[T]) WaitContext(ctx context.Context) (T, error) {
+func (w *future[T]) waitContext(ctx context.Context) (T, error) {
 	select {
 	case <-ctx.Done():
 		var zero T
@@ -66,9 +66,12 @@ func (w *waitable[T]) WaitContext(ctx context.Context) (T, error) {
 }
 
 type request[K comparable, V any] struct {
-	key  K
-	wait *waitable[V]
+	key    K
+	future *future[V]
 }
+
+func (req *request[K, V]) Fill(v V)      { req.future.Fill(v) }
+func (req *request[K, V]) Err(err error) { req.future.Err(err) }
 
 func NewCache[K comparable, V any](
 	fetch func(ctx context.Context, key K) (V, error),
@@ -93,13 +96,13 @@ func NewCache[K comparable, V any](
 
 				value, err := fetch(ctx, req.key)
 				if err != nil {
-					req.wait.Err(err)
+					req.future.Err(err)
 				} else {
-					req.wait.Set(value)
+					req.future.Fill(value)
 					c.storage.Put(req.key, value)
 				}
 				c.m.Lock()
-				c.waits.Delete(req.key)
+				c.waiters.Delete(req.key)
 				c.m.Unlock()
 			}
 		})
@@ -157,17 +160,17 @@ func NewBatchFetchCache[K comparable, V any](
 				)
 				if err != nil {
 					for _, req := range batch {
-						req.wait.Err(err)
+						req.future.Err(err)
 					}
 				} else {
 					for i, req := range batch {
-						req.wait.Set(values[i])
+						req.future.Fill(values[i])
 						c.storage.Put(req.key, values[i])
 					}
 				}
 				c.m.Lock()
 				for _, req := range batch {
-					c.waits.Delete(req.key)
+					c.waiters.Delete(req.key)
 				}
 				c.m.Unlock()
 			}
@@ -191,18 +194,18 @@ func (c *Cache[K, V]) Get(ctx context.Context, key K) (V, error) {
 		c.m.RUnlock()
 		return v, nil
 	}
-	w, alreadyExisted := c.waits.LoadOrStoreFunc(key, newWaitable[V])
+	w, alreadyExisted := c.waiters.LoadOrStoreFunc(key, newFuture[V])
 	if !alreadyExisted {
 		select {
 		case <-ctx.Done():
 			c.m.RUnlock()
 			var zero V
 			return zero, ctx.Err()
-		case c.reqs <- request[K, V]{key: key, wait: w}:
+		case c.reqs <- request[K, V]{key: key, future: w}:
 		}
 	}
 	c.m.RUnlock()
-	return w.WaitContext(ctx)
+	return w.waitContext(ctx)
 }
 
 func (c *Cache[K, V]) GetBatch(ctx context.Context, keys []K) ([]V, error) {
@@ -221,24 +224,24 @@ func (c *Cache[K, V]) GetBatch(ctx context.Context, keys []K) ([]V, error) {
 	}
 	c.markMany(len(keys)-len(misses), len(misses))
 
-	waits := make([]*waitable[V], len(misses))
+	futures := make([]*future[V], len(misses))
 	for i, key := range misses {
 		var alreadyExisted bool
-		waits[i], alreadyExisted = c.waits.LoadOrStoreFunc(key, newWaitable[V])
+		futures[i], alreadyExisted = c.waiters.LoadOrStoreFunc(key, newFuture[V])
 		if !alreadyExisted {
 			select {
 			case <-ctx.Done():
 				c.m.RUnlock()
 				return nil, ctx.Err()
-			case c.reqs <- request[K, V]{key: key, wait: waits[i]}:
+			case c.reqs <- request[K, V]{key: key, future: futures[i]}:
 			}
 		}
 	}
 	c.m.RUnlock()
 
-	for i, w := range waits {
+	for i, w := range futures {
 		var err error
-		values[missIdxs[i]], err = w.WaitContext(ctx)
+		values[missIdxs[i]], err = w.waitContext(ctx)
 		if err != nil {
 			return nil, err
 		}
