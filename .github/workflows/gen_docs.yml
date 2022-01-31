@@ -17,9 +17,11 @@ jobs:
         stable: false
 
     - name: Generate
-      run:
+      run: |
+        set -euxo pipefail
         go run github.com/bradenaw/godoc_gh_pages@latest --out_dir docs/
         git add docs/
+        git commit -am "generate docs"
         git config --global user.name 'godoc_gh_pages workflow'
         git config --global user.email 'godoc_gh_pages@users.noreply.github.com'
-        git push origin `git subtree split --prefix docs master`:gh-pages --force
+        git push origin `git subtree split --prefix docs main`:gh-pages --force
