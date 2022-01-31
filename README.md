@@ -25,3 +25,5 @@ c := bergamot.NewCache[uint64, User](
 
 u, err := c.Get(ctx, 12345)
 ```
+
+See the [docs](https://bradenaw.github.io/bergamot/) for more.
