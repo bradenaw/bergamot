@@ -1,5 +1,7 @@
 # Bergamot
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/bradenaw/bergamot.svg)](https://pkg.go.dev/github.com/bradenaw/bergamot)
+
 Bergamot is a small Go library for caching. It has a few backings with different eviction policies
 that can be used on their own or paired with the `Cache` type to coordinate populates on cache
 misses.
@@ -26,4 +28,4 @@ c := bergamot.NewCache[uint64, User](
 u, err := c.Get(ctx, 12345)
 ```
 
-See the [docs](https://bradenaw.github.io/bergamot/) for more.
+See the [docs](https://pkg.go.dev/github.com/bradenaw/bergamot) for more.
