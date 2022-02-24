@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/bradenaw/juniper/slices"
 	"github.com/bradenaw/juniper/stream"
+	"github.com/bradenaw/juniper/xslices"
 	"github.com/bradenaw/juniper/xsync"
 )
 
@@ -143,7 +143,7 @@ func NewBatchFetchCache[K comparable, V any](
 
 				values, err := fetchBatch(
 					ctx,
-					slices.Map(batch, func(req request[K, V]) K { return req.key }),
+					xslices.Map(batch, func(req request[K, V]) K { return req.key }),
 				)
 				if err != nil {
 					for _, req := range batch {
