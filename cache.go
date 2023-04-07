@@ -11,7 +11,7 @@ import (
 	"github.com/bradenaw/juniper/xsync"
 )
 
-// Cache is a Backing, used to store keys and values in memory, paired with read-through and
+// ReadThrough is a cache used to store keys and values in memory paired with read-through and
 // population coordination.
 //
 // A common problem with caches is the thundering herd. A naive usage of a cache will check the
@@ -20,15 +20,15 @@ import (
 // this is likely for a key that suddenly becomes popular. Many goroutines will then all ask the
 // authoritative store for the value at once.
 //
-// Cache coordinates populates to lessen this problem. If one goroutine asks for a key, and another
+// ReadThrough coordinates populates to lessen this problem. If one goroutine asks for a key, and another
 // goroutine asks for the same key at the same time, the second will simply wait for the populate by
 // the first to finish and receive the same value.
-type Cache[K comparable, V any] struct {
+type ReadThrough[K comparable, V any] struct {
 	// Used for atomicity between cache misses and waiters populates. Deletes from waiters must hold
-	// in W, interactions with backing+waiters can hold in R.
+	// in W, interactions with cache+waiters can hold in R.
 	m sync.RWMutex
 
-	backing Backing[K, V]
+	cache   Cache[K, V]
 	waiters syncMap[K, *future[V]]
 	reqs    chan request[K, V]
 	hits    uint64
@@ -37,15 +37,13 @@ type Cache[K comparable, V any] struct {
 	bg *xsync.Group
 }
 
-// Backing is the in-memory backing storage for a Cache. This holds the actual keys and values, and
-// most importantly implements the eviction policy.
+// Cache is an in-memory cache. This holds the actual keys and values, and most importantly
+// implements the eviction policy.
 //
-// Backings are usable directly, but it's usually desirable to wrap a Backing in a Cache.
-//
-// There are several provided implementations of Backing. If you're unsure of which to use, CAR is a
+// There are several provided implementations of Cache. If you're unsure of which to use, CAR is a
 // good default.
-type Backing[K any, V any] interface {
-	// Put adds the given key and value to the Backing, possibly evicting another key.
+type Cache[K any, V any] interface {
+	// Put adds the given key and value to the Cache, possibly evicting another key.
 	Put(K, V)
 	// Get returns the value associated with the given key, or false in the second return if the key
 	// is not resident.
@@ -54,27 +52,28 @@ type Backing[K any, V any] interface {
 	Forget(K)
 }
 
-// NewCache returns a Cache that uses backing as its backing store. It has fetchParallelism
-// background goroutines that will call fetch for each miss in Get and GetBatch.
-func NewCache[K comparable, V any](
+// NewReadThrough returns a ReadThrough that stores items in cache and reads-through using fetch on
+// misses. It has fetchParallelism background goroutines that will call fetch for each miss in Get
+// and GetBatch.
+func NewReadThrough[K comparable, V any](
 	fetch func(ctx context.Context, key K) (V, error),
 	fetchParallelism int,
-	backing Backing[K, V],
-) *Cache[K, V] {
-	c := &Cache[K, V]{
-		backing: backing,
-		reqs:    make(chan request[K, V]),
-		bg:      xsync.NewGroup(context.Background()),
+	cache Cache[K, V],
+) *ReadThrough[K, V] {
+	rt := &ReadThrough[K, V]{
+		cache: cache,
+		reqs:  make(chan request[K, V]),
+		bg:    xsync.NewGroup(context.Background()),
 	}
 
 	for i := 0; i < fetchParallelism; i++ {
-		c.bg.Once(func(ctx context.Context) {
+		rt.bg.Once(func(ctx context.Context) {
 			for {
 				var req request[K, V]
 				select {
 				case <-ctx.Done():
 					return
-				case req = <-c.reqs:
+				case req = <-rt.reqs:
 				}
 
 				value, err := fetch(ctx, req.key)
@@ -82,39 +81,39 @@ func NewCache[K comparable, V any](
 					req.future.Err(err)
 				} else {
 					req.future.Fill(value)
-					c.backing.Put(req.key, value)
+					rt.cache.Put(req.key, value)
 				}
-				c.m.Lock()
-				c.waiters.Delete(req.key)
-				c.m.Unlock()
+				rt.m.Lock()
+				rt.waiters.Delete(req.key)
+				rt.m.Unlock()
 			}
 		})
 	}
 
-	return c
+	return rt
 }
 
-// NewBatchFetchCache returns a Cache that uses backing as its backing storage. It has
+// NewBatchFetchReadThrough returns a ReadThrough that uses cache as its cache storage. It has
 // fetchParallelism background goroutines used to call fetchBatch to fetch for each miss in Get and
 // GetBatch. On a miss, it will wait for up to batchInterval for other misses before calling
 // fetchBatch for up to batchSize of them at once.
-func NewBatchFetchCache[K comparable, V any](
+func NewBatchFetchReadThrough[K comparable, V any](
 	fetchBatch func(ctx context.Context, batch []K) ([]V, error),
 	fetchParallelism int,
 	batchInterval time.Duration,
 	batchSize int,
-	backing Backing[K, V],
-) *Cache[K, V] {
-	c := &Cache[K, V]{
-		backing: backing,
-		reqs:    make(chan request[K, V]),
-		bg:      xsync.NewGroup(context.Background()),
+	cache Cache[K, V],
+) *ReadThrough[K, V] {
+	rt := &ReadThrough[K, V]{
+		cache: cache,
+		reqs:  make(chan request[K, V]),
+		bg:    xsync.NewGroup(context.Background()),
 	}
 
 	batches := make(chan []request[K, V])
 
-	c.bg.Once(func(ctx context.Context) {
-		batchStream := stream.Batch(stream.Chan(c.reqs), batchInterval, batchSize)
+	rt.bg.Once(func(ctx context.Context) {
+		batchStream := stream.Batch(stream.Chan(rt.reqs), batchInterval, batchSize)
 		defer batchStream.Close()
 
 		for {
@@ -132,7 +131,7 @@ func NewBatchFetchCache[K comparable, V any](
 	})
 
 	for i := 0; i < fetchParallelism; i++ {
-		c.bg.Once(func(ctx context.Context) {
+		rt.bg.Once(func(ctx context.Context) {
 			for {
 				var batch []request[K, V]
 				select {
@@ -152,47 +151,47 @@ func NewBatchFetchCache[K comparable, V any](
 				} else {
 					for i, req := range batch {
 						req.future.Fill(values[i])
-						c.backing.Put(req.key, values[i])
+						rt.cache.Put(req.key, values[i])
 					}
 				}
-				c.m.Lock()
+				rt.m.Lock()
 				for _, req := range batch {
-					c.waiters.Delete(req.key)
+					rt.waiters.Delete(req.key)
 				}
-				c.m.Unlock()
+				rt.m.Unlock()
 			}
 		})
 	}
 
-	return c
+	return rt
 }
 
 // TryGet tries to get key from the cache. It returns false in the second return immediately if key
 // isn't currently resident in the cache, and does not try to populate.
-func (c *Cache[K, V]) TryGet(key K) (V, bool) {
-	value, ok := c.backing.Get(key)
-	c.mark(ok)
+func (rt *ReadThrough[K, V]) TryGet(key K) (V, bool) {
+	value, ok := rt.cache.Get(key)
+	rt.mark(ok)
 	return value, ok
 }
 
 // Get gets key from the cache. If key is not currently in the cache, causes the cache to fetch and
 // populate it.
-func (c *Cache[K, V]) Get(ctx context.Context, key K) (V, error) {
-	c.m.RLock()
-	v, ok := c.backing.Get(key)
-	c.mark(ok)
+func (rt *ReadThrough[K, V]) Get(ctx context.Context, key K) (V, error) {
+	rt.m.RLock()
+	v, ok := rt.cache.Get(key)
+	rt.mark(ok)
 	if ok {
-		c.m.RUnlock()
+		rt.m.RUnlock()
 		return v, nil
 	}
-	w, alreadyExisted := c.waiters.LoadOrStoreFunc(key, newFuture[V])
-	c.m.RUnlock()
+	w, alreadyExisted := rt.waiters.LoadOrStoreFunc(key, newFuture[V])
+	rt.m.RUnlock()
 	if !alreadyExisted {
 		select {
 		case <-ctx.Done():
 			var zero V
 			return zero, ctx.Err()
-		case c.reqs <- request[K, V]{key: key, future: w}:
+		case rt.reqs <- request[K, V]{key: key, future: w}:
 		}
 	}
 	return w.waitContext(ctx)
@@ -200,34 +199,34 @@ func (c *Cache[K, V]) Get(ctx context.Context, key K) (V, error) {
 
 // Get gets a set of keys from the cache at once. If any key in keys is not currently in the cache,
 // causes the cache to fetch and populate them.
-func (c *Cache[K, V]) GetBatch(ctx context.Context, keys []K) ([]V, error) {
+func (rt *ReadThrough[K, V]) GetBatch(ctx context.Context, keys []K) ([]V, error) {
 	values := make([]V, len(keys))
 	var misses []K
 	var missIdxs []int
 
-	c.m.RLock()
+	rt.m.RLock()
 	for i, key := range keys {
 		var ok bool
-		values[i], ok = c.backing.Get(keys[i])
+		values[i], ok = rt.cache.Get(keys[i])
 		if !ok {
 			misses = append(misses, key)
 			missIdxs = append(missIdxs, i)
 		}
 	}
-	c.markMany(len(keys)-len(misses), len(misses))
+	rt.markMany(len(keys)-len(misses), len(misses))
 
 	futures := make([]*future[V], len(misses))
 	alreadyExisted := make([]bool, len(misses))
 	for i, key := range misses {
-		futures[i], alreadyExisted[i] = c.waiters.LoadOrStoreFunc(key, newFuture[V])
+		futures[i], alreadyExisted[i] = rt.waiters.LoadOrStoreFunc(key, newFuture[V])
 	}
-	c.m.RUnlock()
+	rt.m.RUnlock()
 	for i := range alreadyExisted {
 		if !alreadyExisted[i] {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case c.reqs <- request[K, V]{key: misses[i], future: futures[i]}:
+			case rt.reqs <- request[K, V]{key: misses[i], future: futures[i]}:
 			}
 		}
 	}
@@ -243,40 +242,40 @@ func (c *Cache[K, V]) GetBatch(ctx context.Context, keys []K) ([]V, error) {
 }
 
 // Put adds the given key and value to the cache, overwriting if already resident.
-func (c *Cache[K, V]) Put(key K, value V) {
-	c.backing.Put(key, value)
+func (rt *ReadThrough[K, V]) Put(key K, value V) {
+	rt.cache.Put(key, value)
 }
 
 // Forget removes key from the cache immediately.
-func (c *Cache[K, V]) Forget(key K) {
-	c.backing.Forget(key)
+func (rt *ReadThrough[K, V]) Forget(key K) {
+	rt.cache.Forget(key)
 }
 
 // HitRate returns the hit rate of the cache: the number of times a 'Get' asked for a key that was
 // resident in the cache over the total number of requests for keys.
-func (c *Cache[K, V]) HitRate() float64 {
-	hits := atomic.LoadUint64(&c.hits)
-	misses := atomic.LoadUint64(&c.misses)
+func (rt *ReadThrough[K, V]) HitRate() float64 {
+	hits := atomic.LoadUint64(&rt.hits)
+	misses := atomic.LoadUint64(&rt.misses)
 	return float64(hits) / (float64(hits) + float64(misses))
 }
 
 // Close cleans up any background resources in use by the cache. It is invalid to call any methods
-// on c after calling Close.
-func (c *Cache[K, V]) Close() {
-	c.bg.Wait()
+// on rt after calling Close.
+func (rt *ReadThrough[K, V]) Close() {
+	rt.bg.Wait()
 }
 
-func (c *Cache[K, V]) mark(hit bool) {
+func (rt *ReadThrough[K, V]) mark(hit bool) {
 	if hit {
-		atomic.AddUint64(&c.hits, 1)
+		atomic.AddUint64(&rt.hits, 1)
 	} else {
-		atomic.AddUint64(&c.misses, 1)
+		atomic.AddUint64(&rt.misses, 1)
 	}
 }
 
-func (c *Cache[K, V]) markMany(hits int, misses int) {
-	atomic.AddUint64(&c.hits, uint64(hits))
-	atomic.AddUint64(&c.misses, uint64(misses))
+func (rt *ReadThrough[K, V]) markMany(hits int, misses int) {
+	atomic.AddUint64(&rt.hits, uint64(hits))
+	atomic.AddUint64(&rt.misses, uint64(misses))
 }
 
 type future[T any] struct {

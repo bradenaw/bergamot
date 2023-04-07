@@ -4,9 +4,9 @@ import (
 	"sync"
 )
 
-// LRU is a least-recently-used eviction policy cache backing. It has a defined size in number of
-// items. If the LRU is full when putting an item, the key that was least recently Get or Put is
-// evicted to make space.
+// LRU is a least-recently-used eviction policy cache. It has a defined size in number of items. If
+// the LRU is full when putting an item, the key that was least recently Get or Put is evicted to
+// make space.
 //
 // LRU's methods may be called concurrently.
 type LRU[K comparable, V any] struct {
@@ -16,7 +16,7 @@ type LRU[K comparable, V any] struct {
 	size  int
 }
 
-var _ Backing[byte, int] = &LRU[byte, int]{}
+var _ Cache[byte, int] = &LRU[byte, int]{}
 
 func NewLRU[K comparable, V any](size int) *LRU[K, V] {
 	return &LRU[K, V]{

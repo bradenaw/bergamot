@@ -4,15 +4,15 @@ import (
 	"github.com/bradenaw/juniper/xsync"
 )
 
-// Unbounded is an unbounded-size cache backing. It will never evict keys on its own, and thus will
-// grow to arbitrary size.
+// Unbounded is an unbounded-size cache. It will never evict keys on its own, and thus will grow to
+// arbitrary size.
 //
 // Unbounded's methods may be called concurrently.
 type Unbounded[K comparable, V any] struct {
 	m xsync.Map[K, V]
 }
 
-var _ Backing[byte, int] = &Unbounded[byte, int]{}
+var _ Cache[byte, int] = &Unbounded[byte, int]{}
 
 func NewUnbounded[K comparable, V any]() *Unbounded[K, V] {
 	return &Unbounded[K, V]{}

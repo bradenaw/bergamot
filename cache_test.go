@@ -12,15 +12,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestStressCache(t *testing.T) {
-	check := func(storage Backing[int, string]) {
-		c := NewCache[int, string](
+func TestStressReadThrough(t *testing.T) {
+	check := func(cache Cache[int, string]) {
+		rt := NewReadThrough[int, string](
 			func(ctx context.Context, key int) (string, error) {
 				time.Sleep(4 * time.Millisecond)
 				return strconv.Itoa(key), nil
 			},
 			4,
-			storage,
+			cache,
 		)
 		ctx := context.Background()
 		attempts := uint64(0)
@@ -39,7 +39,7 @@ func TestStressCache(t *testing.T) {
 
 				for time.Since(start) < d {
 					key := int(zipf.Uint64())
-					value, err := c.Get(ctx, key)
+					value, err := rt.Get(ctx, key)
 					require.NoError(t, err)
 					require.Equal(t, value, strconv.Itoa(key))
 					atomic.AddUint64(&attempts, 1)
@@ -60,7 +60,7 @@ func TestStressCache(t *testing.T) {
 					for i := range keys {
 						keys[i] = int(zipf.Uint64())
 					}
-					values, err := c.GetBatch(ctx, keys)
+					values, err := rt.GetBatch(ctx, keys)
 					require.NoError(t, err)
 					for i := range values {
 						require.Equal(t, values[i], strconv.Itoa(keys[i]))
@@ -79,7 +79,7 @@ func TestStressCache(t *testing.T) {
 					"%s %d attempts, hit rate = %.2f%%",
 					time.Since(start).Round(time.Second),
 					atomic.LoadUint64(&attempts),
-					c.HitRate()*100,
+					rt.HitRate()*100,
 				)
 			}
 		}()

@@ -12,7 +12,7 @@ type vAndRef[V any] struct {
 	ref uint32
 }
 
-// CAR is a CLOCK-with-Adaptive-Replacement cache backing.
+// CAR is a CLOCK-with-Adaptive-Replacement cache.
 //
 // The eviction policy is an approximation to a combination between least-recently-used and
 // least-frequently-used, self-balancing resources between the two based on their relative
@@ -64,7 +64,7 @@ type CAR[K comparable, V any] struct {
 	shortTermTargetSize int
 }
 
-var _ Backing[byte, int] = &CAR[byte, int]{}
+var _ Cache[byte, int] = &CAR[byte, int]{}
 
 // NewCAR returns a CAR that has space for the given number of items.
 func NewCAR[K comparable, V any](size int) *CAR[K, V] {
